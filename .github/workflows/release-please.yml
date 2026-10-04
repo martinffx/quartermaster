@@ -15,6 +15,11 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
+          # PRs opened with GITHUB_TOKEN don't trigger CI, so the required checks never
+          # run on the release PR. Add a RELEASE_PLEASE_TOKEN secret (a fine-grained PAT
+          # with contents and pull-requests write) to fix that; until then this falls
+          # back to GITHUB_TOKEN.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
       # Ask the module proxy for the new tag so pkg.go.dev indexes it right away.
