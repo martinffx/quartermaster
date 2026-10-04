@@ -4,5 +4,6 @@
   "bump-minor-pre-major": true,
   "packages": {
     ".": {}
-  }
+  },
+  "initial-version": "0.1.0"
 }
