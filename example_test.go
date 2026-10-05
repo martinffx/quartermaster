@@ -12,16 +12,24 @@ import (
 	"github.com/martinffx/quartermaster/internal/testdb"
 )
 
-// Wire the Transactor once, next to your sqlc-generated Queries. Options set
-// defaults for every transaction it starts.
+// Wire the Transactor once, next to your sqlc-generated Queries.
 func ExampleNew() {
+	// pool is a *pgxpool.Pool; testdb.New is sqlc's generated constructor.
+	txr := quartermaster.New(pool, testdb.New(pool))
+	_ = txr
+}
+
+// Config sets the options for every transaction the Transactor starts. Under
+// Serializable or RepeatableRead, PostgreSQL can fail a transaction with
+// SQLSTATE 40001; retrying the whole closure is up to the caller.
+func ExampleNewWithConfig() {
 	ctx := context.Background()
 
 	// pool is a *pgxpool.Pool; testdb.New is sqlc's generated constructor.
-	txr := quartermaster.New(pool, testdb.New(pool),
-		quartermaster.WithTxOptions(pgx.TxOptions{IsoLevel: pgx.RepeatableRead}),
-		quartermaster.WithRollbackTimeout(2*time.Second),
-	)
+	txr := quartermaster.NewWithConfig(pool, testdb.New(pool), quartermaster.Config{
+		TxOptions:       pgx.TxOptions{IsoLevel: pgx.RepeatableRead},
+		RollbackTimeout: 2 * time.Second,
+	})
 
 	level, err := txr.RunTx(ctx, func(q *testdb.Queries) (string, error) {
 		return q.IsolationLevel(ctx)
@@ -69,19 +77,4 @@ func ExampleTransactor_RunTx_rollback() {
 	// Output:
 	// same error: true
 	// rows committed: 0
-}
-
-// RunTxOpts overrides the default options for one call. Under Serializable,
-// PostgreSQL can fail a transaction with SQLSTATE 40001 (a serialization
-// failure); retrying the whole closure is up to the caller.
-func ExampleTransactor_RunTxOpts() {
-	ctx := context.Background()
-	txr := quartermaster.New(pool, testdb.New(pool))
-
-	level, err := txr.RunTxOpts(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable},
-		func(q *testdb.Queries) (string, error) {
-			return q.IsolationLevel(ctx)
-		})
-	fmt.Println(level, err)
-	// Output: serializable <nil>
 }

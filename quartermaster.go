@@ -37,7 +37,7 @@
 // propagates. The rollback runs even if ctx was canceled, so a canceled request
 // still gets a clean ROLLBACK and the connection can be reused. It is bounded
 // so that an unresponsive server cannot block [Transactor.RunTx] forever. The
-// bound is, in order: the duration set with [WithRollbackTimeout]; the time
+// bound is, in order: the duration set in [Config.RollbackTimeout]; the time
 // remaining until ctx's deadline, if it has one and has not passed; otherwise
 // five seconds.
 //
@@ -63,8 +63,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// defaultRollbackTimeout bounds a rollback when neither [WithRollbackTimeout]
-// nor a live ctx deadline applies.
+// defaultRollbackTimeout bounds a rollback when neither
+// [Config.RollbackTimeout] nor a live ctx deadline applies.
 const defaultRollbackTimeout = 5 * time.Second
 
 // Queries is satisfied by sqlc-generated *Queries (sql_package: "pgx/v5"),
@@ -73,48 +73,49 @@ type Queries[Q any] interface {
 	WithTx(pgx.Tx) Q
 }
 
+// Config configures a Transactor. The zero value is valid.
+type Config struct {
+	// TxOptions are the isolation level, access mode and deferrable mode for
+	// every transaction the Transactor starts. For a different level, build
+	// another Transactor with [NewWithConfig].
+	//
+	// Under [pgx.Serializable] and [pgx.RepeatableRead], PostgreSQL can fail a
+	// transaction with SQLSTATE 40001; retrying the whole closure is up to the
+	// caller.
+	TxOptions pgx.TxOptions
+
+	// RollbackTimeout bounds how long a rollback may take. Zero or less uses the
+	// default: the time remaining until the context's deadline if it has one
+	// that has not passed, otherwise five seconds. See the package
+	// documentation.
+	RollbackTimeout time.Duration
+}
+
 // Transactor runs functions inside a transaction. Q is the sqlc-generated
 // *Queries type. A Transactor is safe for concurrent use by multiple
 // goroutines.
 type Transactor[Q Queries[Q]] struct {
-	pool            *pgxpool.Pool
-	q               Q
-	opts            pgx.TxOptions
-	rollbackTimeout time.Duration
-}
-
-type config struct {
-	opts            pgx.TxOptions
-	rollbackTimeout time.Duration
-}
-
-// Option configures a Transactor.
-type Option func(*config)
-
-// WithTxOptions sets the default isolation level, access mode and deferrable
-// mode for every transaction the Transactor starts.
-func WithTxOptions(opts pgx.TxOptions) Option {
-	return func(c *config) { c.opts = opts }
-}
-
-// WithRollbackTimeout bounds how long a rollback may take. A value of zero or
-// less leaves the default: the time remaining until the context's deadline if
-// it has one that has not passed, otherwise five seconds. See the package
-// documentation.
-func WithRollbackTimeout(d time.Duration) Option {
-	return func(c *config) { c.rollbackTimeout = d }
+	pool *pgxpool.Pool
+	q    Q
+	cfg  Config
 }
 
 // New returns a Transactor that begins transactions on pool and binds each one
-// to q with q.WithTx:
+// to q with q.WithTx, using the default [Config]:
 //
 //	txr := quartermaster.New(pool, db.New(pool))
-func New[Q Queries[Q]](pool *pgxpool.Pool, q Q, opts ...Option) *Transactor[Q] {
-	var c config
-	for _, o := range opts {
-		o(&c)
-	}
-	return &Transactor[Q]{pool: pool, q: q, opts: c.opts, rollbackTimeout: c.rollbackTimeout}
+func New[Q Queries[Q]](pool *pgxpool.Pool, q Q) *Transactor[Q] {
+	return NewWithConfig(pool, q, Config{})
+}
+
+// NewWithConfig is like [New] but uses cfg:
+//
+//	txr := quartermaster.NewWithConfig(pool, db.New(pool), quartermaster.Config{
+//		TxOptions:       pgx.TxOptions{IsoLevel: pgx.RepeatableRead},
+//		RollbackTimeout: 2 * time.Second,
+//	})
+func NewWithConfig[Q Queries[Q]](pool *pgxpool.Pool, q Q, cfg Config) *Transactor[Q] {
+	return &Transactor[Q]{pool: pool, q: q, cfg: cfg}
 }
 
 // RunTx begins a transaction, calls fn with Queries bound to it, and commits if
@@ -130,18 +131,9 @@ func New[Q Queries[Q]](pool *pgxpool.Pool, q Q, opts ...Option) *Transactor[Q] {
 // a separate transaction on a second connection that commits or rolls back
 // independently; see "Nested transactions" in the package documentation.
 func (t *Transactor[Q]) RunTx[R any](ctx context.Context, fn func(Q) (R, error)) (R, error) {
-	return t.RunTxOpts(ctx, t.opts, fn)
-}
-
-// RunTxOpts is like [Transactor.RunTx] but overrides the Transactor's default
-// transaction options for this call, for example to run one method at a higher
-// isolation level. Under [pgx.Serializable] and [pgx.RepeatableRead], PostgreSQL
-// can fail a transaction with SQLSTATE 40001; retrying the whole of fn is up to
-// the caller.
-func (t *Transactor[Q]) RunTxOpts[R any](ctx context.Context, opts pgx.TxOptions, fn func(Q) (R, error)) (R, error) {
 	var zero R
 
-	tx, err := t.pool.BeginTx(ctx, opts)
+	tx, err := t.pool.BeginTx(ctx, t.cfg.TxOptions)
 	if err != nil {
 		return zero, fmt.Errorf("quartermaster: begin: %w", err)
 	}
@@ -152,7 +144,7 @@ func (t *Transactor[Q]) RunTxOpts[R any](ctx context.Context, opts pgx.TxOptions
 	// commit Rollback returns pgx.ErrTxClosed, which is expected, and on the
 	// error path there is already an error to return, so this one is ignored.
 	defer func() {
-		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout(ctx, t.rollbackTimeout))
+		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout(ctx, t.cfg.RollbackTimeout))
 		defer cancel()
 		_ = tx.Rollback(rbCtx)
 	}()

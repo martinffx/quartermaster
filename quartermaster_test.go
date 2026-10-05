@@ -32,8 +32,12 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func newTxr(opts ...quartermaster.Option) *quartermaster.Transactor[*testdb.Queries] {
-	return quartermaster.New(pool, testdb.New(pool), opts...)
+func newTxr() *quartermaster.Transactor[*testdb.Queries] {
+	return quartermaster.New(pool, testdb.New(pool))
+}
+
+func newTxrWith(opts pgx.TxOptions) *quartermaster.Transactor[*testdb.Queries] {
+	return quartermaster.NewWithConfig(pool, testdb.New(pool), quartermaster.Config{TxOptions: opts})
 }
 
 // count returns how many committed rows have name, read outside any transaction.
@@ -156,7 +160,7 @@ func TestRunTxCommitRollbackSurfaces(t *testing.T) {
 
 	// The insert fails in a read-only transaction. fn swallows that error and
 	// returns nil, so COMMIT is answered with ROLLBACK and pgx reports it.
-	_, err := newTxr().RunTxOpts(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(q *testdb.Queries) (struct{}, error) {
+	_, err := newTxrWith(pgx.TxOptions{AccessMode: pgx.ReadOnly}).RunTx(ctx, func(q *testdb.Queries) (struct{}, error) {
 		_, _ = q.InsertItem(ctx, name)
 		return struct{}{}, nil
 	})
@@ -174,8 +178,7 @@ func TestRunTxCommitRollbackSurfaces(t *testing.T) {
 func TestRunTxSerializationConflictSurfaces(t *testing.T) {
 	ctx := t.Context()
 	name := pgtest.Unique(t, "serial")
-	opts := pgx.TxOptions{IsoLevel: pgx.Serializable}
-	txr := newTxr()
+	txr := newTxrWith(pgx.TxOptions{IsoLevel: pgx.Serializable})
 
 	// Two serializable transactions that each read what the other writes. Both
 	// read the count first, then both insert, so one must fail with 40001.
@@ -192,7 +195,7 @@ func TestRunTxSerializationConflictSurfaces(t *testing.T) {
 			release := func() { once.Do(ready.Done) }
 			defer release()
 
-			_, errs[i] = txr.RunTxOpts(ctx, opts, func(q *testdb.Queries) (struct{}, error) {
+			_, errs[i] = txr.RunTx(ctx, func(q *testdb.Queries) (struct{}, error) {
 				if _, err := q.CountItemsByName(ctx, name); err != nil {
 					return struct{}{}, err
 				}
@@ -233,14 +236,14 @@ func TestTxOptionsApply(t *testing.T) {
 		t.Fatalf("default level = %q, %v; want read committed", got, err)
 	}
 
-	got, err = newTxr(quartermaster.WithTxOptions(pgx.TxOptions{IsoLevel: pgx.RepeatableRead})).RunTx(ctx, level)
+	got, err = newTxrWith(pgx.TxOptions{IsoLevel: pgx.RepeatableRead}).RunTx(ctx, level)
 	if err != nil || got != "repeatable read" {
-		t.Fatalf("WithTxOptions level = %q, %v; want repeatable read", got, err)
+		t.Fatalf("Config.TxOptions level = %q, %v; want repeatable read", got, err)
 	}
 
-	got, err = newTxr().RunTxOpts(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable}, level)
+	got, err = newTxrWith(pgx.TxOptions{IsoLevel: pgx.Serializable}).RunTx(ctx, level)
 	if err != nil || got != "serializable" {
-		t.Fatalf("RunTxOpts level = %q, %v; want serializable", got, err)
+		t.Fatalf("Serializable level = %q, %v; want serializable", got, err)
 	}
 }
 
