@@ -75,9 +75,13 @@ type Queries[Q any] interface {
 
 // Config configures a Transactor. The zero value is valid.
 type Config struct {
-	// TxOptions are the default isolation level, access mode and deferrable
-	// mode for every transaction the Transactor starts. [Transactor.RunTxOpts]
-	// overrides them for one call.
+	// TxOptions are the isolation level, access mode and deferrable mode for
+	// every transaction the Transactor starts. For a different level, build
+	// another Transactor with [NewWithConfig].
+	//
+	// Under [pgx.Serializable] and [pgx.RepeatableRead], PostgreSQL can fail a
+	// transaction with SQLSTATE 40001; retrying the whole closure is up to the
+	// caller.
 	TxOptions pgx.TxOptions
 
 	// RollbackTimeout bounds how long a rollback may take. Zero or less uses the
@@ -127,18 +131,9 @@ func NewWithConfig[Q Queries[Q]](pool *pgxpool.Pool, q Q, cfg Config) *Transacto
 // a separate transaction on a second connection that commits or rolls back
 // independently; see "Nested transactions" in the package documentation.
 func (t *Transactor[Q]) RunTx[R any](ctx context.Context, fn func(Q) (R, error)) (R, error) {
-	return t.RunTxOpts(ctx, t.cfg.TxOptions, fn)
-}
-
-// RunTxOpts is like [Transactor.RunTx] but overrides the Transactor's default
-// transaction options for this call, for example to run one method at a higher
-// isolation level. Under [pgx.Serializable] and [pgx.RepeatableRead], PostgreSQL
-// can fail a transaction with SQLSTATE 40001; retrying the whole of fn is up to
-// the caller.
-func (t *Transactor[Q]) RunTxOpts[R any](ctx context.Context, opts pgx.TxOptions, fn func(Q) (R, error)) (R, error) {
 	var zero R
 
-	tx, err := t.pool.BeginTx(ctx, opts)
+	tx, err := t.pool.BeginTx(ctx, t.cfg.TxOptions)
 	if err != nil {
 		return zero, fmt.Errorf("quartermaster: begin: %w", err)
 	}

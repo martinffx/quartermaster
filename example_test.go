@@ -19,7 +19,9 @@ func ExampleNew() {
 	_ = txr
 }
 
-// Config sets defaults for every transaction the Transactor starts.
+// Config sets the options for every transaction the Transactor starts. Under
+// Serializable or RepeatableRead, PostgreSQL can fail a transaction with
+// SQLSTATE 40001; retrying the whole closure is up to the caller.
 func ExampleNewWithConfig() {
 	ctx := context.Background()
 
@@ -75,19 +77,4 @@ func ExampleTransactor_RunTx_rollback() {
 	// Output:
 	// same error: true
 	// rows committed: 0
-}
-
-// RunTxOpts overrides the default options for one call. Under Serializable,
-// PostgreSQL can fail a transaction with SQLSTATE 40001 (a serialization
-// failure); retrying the whole closure is up to the caller.
-func ExampleTransactor_RunTxOpts() {
-	ctx := context.Background()
-	txr := quartermaster.New(pool, testdb.New(pool))
-
-	level, err := txr.RunTxOpts(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable},
-		func(q *testdb.Queries) (string, error) {
-			return q.IsolationLevel(ctx)
-		})
-	fmt.Println(level, err)
-	// Output: serializable <nil>
 }

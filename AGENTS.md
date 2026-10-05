@@ -32,7 +32,7 @@ has the reasoning; read it before proposing API changes.
 
 - Keep the public API small. No driver abstraction, no transaction in `ctx`, no joining, no support for
   other query layers.
-- `RunTx` and `RunTxOpts` must keep returning the closure's typed result. That is the point of the library.
+- `RunTx` must keep returning the closure's typed result. That is the point of the library.
 - `fn`'s error is returned unwrapped. Begin and commit errors keep the `quartermaster: begin: ` and
   `quartermaster: commit: ` prefixes and wrap the cause with `%w`.
 - Generated sqlc code is committed. Edit `schema.sql` or `query.sql`, then `make generate`. Never edit

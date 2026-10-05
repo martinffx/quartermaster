@@ -50,7 +50,7 @@ Read the post this came from: [When did we forget transactions are critical sect
 - `fn`'s error is returned unwrapped, so `errors.Is` works.
 - A panic in `fn` rolls back and propagates. There is no recover.
 - **No joining.** A nested `RunTx` opens a second, independent transaction on a second connection.
-- `Config.TxOptions` sets the default isolation level; `RunTxOpts` overrides it per call.
+- `Config.TxOptions` sets the isolation level for every transaction a `Transactor` starts. For a different level, build another `Transactor`.
 
 Commit errors, the rollback timeout and the cost of nesting are in the
 [package documentation](https://pkg.go.dev/github.com/martinffx/quartermaster).
