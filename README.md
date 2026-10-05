@@ -3,11 +3,15 @@
 [![CI](https://github.com/martinffx/quartermaster/actions/workflows/ci.yml/badge.svg)](https://github.com/martinffx/quartermaster/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/martinffx/quartermaster.svg)](https://pkg.go.dev/github.com/martinffx/quartermaster)
 
-Short Postgres transactions for [sqlc](https://sqlc.dev) and
-[pgx/v5](https://github.com/jackc/pgx). The transaction is handed to your closure as an
-argument. It never goes in `context.Context`.
+> I can do more damage on my laptop in pajamas before my first cup of tea than you can in a year in the field.
+> — Q, *Skyfall* (2012)
 
-> The quartermaster issues the kit, knows exactly who has it, and makes sure it comes back.
+A typed transaction closure for [sqlc](https://sqlc.dev) and [pgx/v5](https://github.com/jackc/pgx),
+built on Go 1.27 generic methods. **Requires Go 1.27+.**
+
+Before 1.27 a method couldn't have its own type parameters, so a `Transactor` could only run
+`func(Q) error`, and results left the closure through captured variables. `RunTx[R]` returns
+whatever your closure returns:
 
 ```go
 txr := quartermaster.New(pool, db.New(pool)) // pool is a *pgxpool.Pool
@@ -22,23 +26,21 @@ payment, err := txr.RunTx(ctx, func(q *db.Queries) (Payment, error) {
 
 `RunTx` begins a transaction, calls your function with `db.Queries` bound to it (via sqlc's
 generated `WithTx`), and commits if you return `nil`. An error, a panic or a canceled context rolls
-it back. Whatever your closure returns comes back out, generically.
+it back.
 
-It is deliberately small and deliberately narrow: **sqlc output with `sql_package: "pgx/v5"`, on a
-`*pgxpool.Pool`.** There's no driver abstraction and no support for other query layers.
+It is deliberately narrow: sqlc output with `sql_package: "pgx/v5"`, on a `*pgxpool.Pool`. No driver
+abstraction and no other query layers.
 
-## Why
+## Design
 
-A transaction is a critical section. Keep it short, block on nothing outside the database, and
-give it one owner. Most Go transaction helpers do the opposite: they put the open transaction in
-`ctx` and quietly join nested calls, so nothing at the call site tells you whether you're inside
-one. A network call slips in, the pool drains the next time that service is slow, and the
-rollback erases a debit for an order that already exists at the broker.
+A DB transaction is a critical section: keep it short, block on nothing outside the database, and
+give it one owner. Many popular `Transactor` helpers do the opposite. They put the open transaction
+in `ctx` and quietly join nested calls, so nothing at the call site tells you whether you're inside
+one, transactions end up spanning services, and a network call slips in. Then the pool drains the
+next time that service is slow, and the rollback erases a debit for an order that already exists at
+the broker.
 
-Read the post this came from: *When did we forget transactions are critical sections?*
-
-The name is the idea. A transaction is kit issued from the stores, not something left lying around
-the camp:
+Read the post this came from: [When did we forget transactions are critical sections?](https://www.martinrichards.me/post/when_did_we_forget_transactions_are_critical_sections/)
 
 - **Issued to a named holder.** `q` goes to exactly one closure, never into `ctx`.
 - **Signed out as briefly as possible.** No network calls while you hold it.
@@ -47,35 +49,23 @@ the camp:
 
 ## Semantics
 
-- `fn`'s error is returned unwrapped, so `errors.Is` works. Begin and commit errors are wrapped as
-  `quartermaster: begin: ...` and `quartermaster: commit: ...`.
+- `fn`'s error is returned unwrapped, so `errors.Is` works.
 - A panic in `fn` rolls back and propagates. There is no recover.
-- A commit error doesn't always mean "rolled back". If the context is canceled while `COMMIT` is on
-  the wire, the server may or may not have committed. Check the state before retrying a write that
-  isn't idempotent.
-- The rollback uses `context.WithoutCancel`, so a canceled request still gets a clean `ROLLBACK` and
-  the connection goes back to the pool instead of being closed. The rollback is bounded so a wedged
-  server can't block `RunTx` forever: `WithRollbackTimeout(d)` if set, otherwise the time left on
-  the context's deadline, otherwise 5 seconds.
-- **No joining.** Calling `RunTx` inside `RunTx` opens a second, independent transaction that
-  commits or rolls back on its own. If an invariant really spans two repositories, write the
-  method that owns it. Nesting has a cost: it holds a **second pooled connection**, so enough
-  concurrent nesting can exhaust the pool. If the inner transaction touches rows the outer one has
-  locked, it waits on the outer transaction while the outer waits in Go. Postgres's deadlock
-  detector can't see that, so only a context deadline or `lock_timeout` ends it. Pass a context with
-  a deadline.
-- `WithTxOptions` sets default isolation/access mode. `RunTxOpts` overrides it per call. Under
-  `Serializable` or `RepeatableRead`, Postgres can fail a transaction with `40001`; retrying the
-  whole closure is up to you.
+- **No joining.** A nested `RunTx` opens a second, independent transaction on a second connection.
+- `WithTxOptions` sets the default isolation level; `RunTxOpts` overrides it per call.
+
+Commit errors, the rollback timeout and the cost of nesting are in the
+[package documentation](https://pkg.go.dev/github.com/martinffx/quartermaster).
 
 ## External calls
 
 Don't keep the transaction open around a network call. Store pending, make the call, store the
-result: two short transactions and no connection held in between. See
-[`examples/payments`](examples/payments), which also shows an idempotency key and an outbox write
-committing together, and tests that no connection is held during `Submit`.
+result. [`examples/payments`](examples/payments) shows it, along with an idempotency key and an
+outbox write committing together.
 
 ## Alternatives
+
+`metalfm/transactor` is the closest design, a typed argument, but its closure can only return `error`.
 
 | Library | How the transaction reaches your code |
 |---|---|
@@ -85,15 +75,8 @@ committing together, and tests that no connection is held during `Submit`.
 
 ## Development
 
-`make help` lists the targets. Tests run against a real Postgres in a container (needs Docker):
-`make test`. `make check` runs everything CI runs. Generated sqlc code is committed. Regenerate with
-`make generate`; sqlc is run through `go run` and is not a dependency of this module.
-
-CI runs lint, `go mod tidy` and `go generate` drift checks, the tests with `-race`, and
-`govulncheck` on every pull request. Releases use
-[release-please](https://github.com/googleapis/release-please): merge commits follow
-[Conventional Commits](https://www.conventionalcommits.org), a release PR collects the changelog and
-the next version, and merging it tags the release.
+`make help` lists the targets. `make test` needs Docker, since the tests run against a real
+Postgres in a container. `make check` runs everything CI runs.
 
 ## License
 
