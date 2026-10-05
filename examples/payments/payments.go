@@ -62,7 +62,7 @@ func (r *PaymentRepo) CreatePending(ctx context.Context, p Payment, idemKey stri
 		if err != nil {
 			return Payment{}, err
 		}
-		if claimed == 0 { // someone else got there first; their commit is visible now
+		if claimed == 0 { // someone else got there first; at READ COMMITTED, the default, their commit is visible now
 			id, err := q.GetIdempotencyKey(ctx, db.GetIdempotencyKeyParams{Scope: idempotencyScope, Key: idemKey})
 			if err != nil {
 				return Payment{}, err
@@ -141,7 +141,8 @@ func NewService(payments *PaymentRepo, rail Rail) *Service {
 
 // Pay stores the payment as pending, calls the rail, then stores the result:
 // two short transactions and no connection held during the network call. If the
-// process dies after Submit the payment stays pending for a reconciler to find.
+// process dies after Submit the payment stays pending; this example has no
+// reconciler, so something else would have to find and finish it.
 func (s *Service) Pay(ctx context.Context, req Request) (Payment, error) {
 	p, err := s.payments.CreatePending(ctx, NewPayment(req.ID, req.AccountID, req.Amount), req.IdempotencyKey)
 	if err != nil {

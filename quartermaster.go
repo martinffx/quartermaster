@@ -34,12 +34,13 @@
 // # Rollback
 //
 // If fn returns an error or panics, the transaction is rolled back; a panic
-// propagates. The rollback runs even if ctx was canceled, so a canceled request
-// still gets a clean ROLLBACK and the connection can be reused. It is bounded
-// so that an unresponsive server cannot block [Transactor.RunTx] forever. The
-// bound is, in order: the duration set in [Config.RollbackTimeout]; the time
-// remaining until ctx's deadline, if it has one and has not passed; otherwise
-// five seconds.
+// propagates. The rollback ignores ctx's cancellation, so it still runs after
+// the request was canceled. If the cancellation interrupted a query, pgx has
+// already closed the connection and PostgreSQL aborts the transaction when it
+// drops. The rollback is bounded so that an unresponsive server cannot block
+// [Transactor.RunTx] forever. The bound is, in order: the duration set in
+// [Config.RollbackTimeout]; the time remaining until ctx's deadline, if it has
+// one and has not passed; otherwise five seconds.
 //
 // # Nested transactions
 //
