@@ -1,10 +1,13 @@
-// Package quartermaster runs short PostgreSQL transactions and hands the
-// transaction to your code as an argument, never through context.Context.
+// Package quartermaster runs short PostgreSQL transactions for sqlc's pgx/v5
+// output and returns a typed result from the closure. It requires Go 1.27,
+// whose generic methods let [Transactor.RunTx] declare its own result type: it
+// takes a func(Q) (R, error) and returns (R, error).
 //
-// It is built for sqlc's pgx/v5 output. The quartermaster issues the kit,
-// knows exactly who has it, and makes sure it comes back: [Transactor.RunTx]
-// begins a transaction, binds it to your generated Queries with WithTx, calls
-// fn exactly once, and then commits or rolls back.
+// The transaction is an argument, never read from or stored in
+// context.Context. The quartermaster issues the kit, knows exactly who has it,
+// and makes sure it comes back: [Transactor.RunTx] begins a transaction, binds
+// it to your generated Queries with WithTx, calls fn exactly once, and then
+// commits or rolls back.
 //
 // # Usage
 //

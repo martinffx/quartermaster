@@ -3,9 +3,11 @@
 ## What this is
 
 `quartermaster` is a small Go library for short PostgreSQL transactions with sqlc (`sql_package: "pgx/v5"`)
-and a `*pgxpool.Pool`. `Transactor.RunTx` begins a transaction, hands your closure Queries bound to it, and
-commits or rolls back. The transaction is an argument. It is never stored in `context.Context`, and nested
-calls never join. The README "Why" section has the reasoning; read it before proposing API changes.
+and a `*pgxpool.Pool`. It exists because Go 1.27 allows generic methods: `Transactor[Q].RunTx[R]` takes a
+`func(Q) (R, error)` and returns `(R, error)`, a typed result from the closure. `RunTx` begins a
+transaction, hands the closure Queries bound to it, and commits or rolls back. The transaction is an
+argument. It is never stored in `context.Context`, and nested calls never join. The README "Design" section
+has the reasoning; read it before proposing API changes.
 
 ## Commands
 
@@ -30,6 +32,7 @@ calls never join. The README "Why" section has the reasoning; read it before pro
 
 - Keep the public API small. No driver abstraction, no transaction in `ctx`, no joining, no support for
   other query layers.
+- `RunTx` and `RunTxOpts` must keep returning the closure's typed result. That is the point of the library.
 - `fn`'s error is returned unwrapped. Begin and commit errors keep the `quartermaster: begin: ` and
   `quartermaster: commit: ` prefixes and wrap the cause with `%w`.
 - Generated sqlc code is committed. Edit `schema.sql` or `query.sql`, then `make generate`. Never edit
