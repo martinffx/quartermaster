@@ -9,8 +9,8 @@
 A typed transaction closure for [sqlc](https://sqlc.dev) and [pgx/v5](https://github.com/jackc/pgx),
 built on Go 1.27 generic methods. **Requires Go 1.27+.**
 
-Before 1.27 a method couldn't have its own type parameters, so a `Transactor` could only run
-`func(Q) error`, and results left the closure through captured variables. `RunTx[R]` returns
+Before 1.27 a method couldn't declare its own type parameters, so `txr.RunTx` couldn't return a
+typed result: you needed a package-level function or captured variables. `RunTx[R]` returns
 whatever your closure returns:
 
 ```go
@@ -24,7 +24,7 @@ payment, err := txr.RunTx(ctx, func(q *db.Queries) (Payment, error) {
 })
 ```
 
-`RunTx` begins a transaction, calls your function with `db.Queries` bound to it (via sqlc's
+`RunTx` begins a transaction, calls your closure with `db.Queries` bound to it (via sqlc's
 generated `WithTx`), and commits if you return `nil`. An error, a panic or a canceled context rolls
 it back.
 
@@ -40,6 +40,9 @@ one, transactions end up spanning services, and a network call slips in.
 
 Read the post this came from: [When did we forget transactions are critical sections?](https://www.martinrichards.me/post/when_did_we_forget_transactions_are_critical_sections/)
 
+The name is the idea: Q is the quartermaster, who issues the kit, knows who has it, and makes sure it
+comes back.
+
 - **Issued to a named holder.** `q` goes to exactly one closure, never into `ctx`.
 - **Signed out as briefly as possible.** No network calls while you hold it.
 - **Always comes back.** It's returned on every path: commit, error, panic or cancel.
@@ -50,7 +53,9 @@ Read the post this came from: [When did we forget transactions are critical sect
 - `fn`'s error is returned unwrapped, so `errors.Is` works.
 - A panic in `fn` rolls back and propagates. There is no recover.
 - **No joining.** A nested `RunTx` opens a second, independent transaction on a second connection.
-- `WithTxOptions` sets the default isolation level; `RunTxOpts` overrides it per call.
+- `NewWithConfig` takes a `Config`. `TxOptions` sets the isolation level for every transaction a
+  `Transactor` starts; for a different level, build another `Transactor`. `RollbackTimeout` bounds
+  the rollback.
 
 Commit errors, the rollback timeout and the cost of nesting are in the
 [package documentation](https://pkg.go.dev/github.com/martinffx/quartermaster).
@@ -67,14 +72,14 @@ outbox write committing together.
 
 | Library | How the transaction reaches your code |
 |---|---|
-| [Thiht/transactor](https://github.com/Thiht/transactor), [go-transaction-manager](https://github.com/avito-tech/go-transaction-manager), [pgxtx](https://github.com/virp/pgxtx), [pgxatomic](https://github.com/ysomad/pgxatomic) | `context.Context`, nested calls join |
+| [Thiht/transactor](https://github.com/Thiht/transactor), [go-transaction-manager](https://github.com/avito-tech/go-transaction-manager), [pgxtx](https://github.com/virp/pgxtx), [pgxatomic](https://github.com/ysomad/pgxatomic) | `context.Context` |
 | [metalfm/transactor](https://github.com/metalfm/transactor) | typed argument, closure returns only `error` |
 | `pgx.BeginFunc` | raw `pgx.Tx`, no sqlc binding |
 
 ## Development
 
 `make help` lists the targets. `make test` needs Docker, since the tests run against a real
-Postgres in a container. `make check` runs everything CI runs.
+Postgres in a container. `make check` runs the same checks CI runs.
 
 ## License
 

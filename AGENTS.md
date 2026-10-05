@@ -14,8 +14,8 @@ has the reasoning; read it before proposing API changes.
 `make help` lists everything. Tests start a real Postgres in a container, so Docker must be running.
 
 - `make test`: `go test -race -count=2 ./...`
-- `make check`: lint, tidy and generate drift checks, `govulncheck`, tests. This is what CI runs, so run it
-  before committing.
+- `make check`: lint, tidy and generate drift checks, `govulncheck`, tests. These are the same checks CI runs,
+  so run it before committing.
 - `make generate`: regenerate the committed sqlc code.
 - `make fmt`, `make lint`
 
@@ -32,7 +32,9 @@ has the reasoning; read it before proposing API changes.
 
 - Keep the public API small. No driver abstraction, no transaction in `ctx`, no joining, no support for
   other query layers.
-- `RunTx` and `RunTxOpts` must keep returning the closure's typed result. That is the point of the library.
+- `RunTx` must keep returning the closure's typed result. That is the point of the library.
+- Transaction options live in `Config`, set in the constructor. There is no per-call override; build another
+  `Transactor` for a different isolation level.
 - `fn`'s error is returned unwrapped. Begin and commit errors keep the `quartermaster: begin: ` and
   `quartermaster: commit: ` prefixes and wrap the cause with `%w`.
 - Generated sqlc code is committed. Edit `schema.sql` or `query.sql`, then `make generate`. Never edit
@@ -49,5 +51,6 @@ has the reasoning; read it before proposing API changes.
 
 Use [Conventional Commits](https://www.conventionalcommits.org): `feat`, `fix`, `docs`, `test`, `build`,
 `ci`, `chore`, with `!` for breaking changes. release-please reads them to choose the next version and write
-the changelog; while the module is pre-1.0, a breaking change bumps the minor version. Merging the release PR
-tags the release.
+the changelog; while the module is pre-1.0, a breaking change bumps the minor version. Squash merges use the PR
+title as the commit message, so PR titles must be conventional commits too. Merging the release PR tags the
+release.
