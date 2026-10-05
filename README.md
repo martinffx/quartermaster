@@ -36,9 +36,7 @@ abstraction and no other query layers.
 A DB transaction is a critical section: keep it short, block on nothing outside the database, and
 give it one owner. Many popular `Transactor` helpers do the opposite. They put the open transaction
 in `ctx` and quietly join nested calls, so nothing at the call site tells you whether you're inside
-one, transactions end up spanning services, and a network call slips in. Then the pool drains the
-next time that service is slow, and the rollback erases a debit for an order that already exists at
-the broker.
+one, transactions end up spanning services, and a network call slips in.
 
 Read the post this came from: [When did we forget transactions are critical sections?](https://www.martinrichards.me/post/when_did_we_forget_transactions_are_critical_sections/)
 
