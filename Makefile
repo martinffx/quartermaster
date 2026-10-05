@@ -33,12 +33,18 @@ vuln: ## Check dependencies for known vulnerabilities
 actionlint: ## Lint the GitHub Actions workflows
 	$(ACTIONLINT)
 
+# The check- targets compare checksums before and after, so they ignore other
+# uncommitted changes and fail only when running the step would change the files.
 check-generate: ## Fail if the sqlc code is out of date
-	go generate ./...
-	git diff --exit-code
+	@before=$$(cat $$(git ls-files '*.sql.go') | cksum); \
+	go generate ./... && \
+	after=$$(cat $$(git ls-files '*.sql.go') | cksum); \
+	[ "$$before" = "$$after" ] || { echo "sqlc code is out of date: run make generate"; exit 1; }
 
 check-tidy: ## Fail if go.mod or go.sum is not tidy
-	go mod tidy
-	git diff --exit-code -- go.mod go.sum
+	@before=$$(cat go.mod go.sum | cksum); \
+	go mod tidy && \
+	after=$$(cat go.mod go.sum | cksum); \
+	[ "$$before" = "$$after" ] || { echo "go.mod or go.sum is not tidy: run make tidy"; exit 1; }
 
 check: lint check-tidy check-generate vuln test ## Everything CI runs
