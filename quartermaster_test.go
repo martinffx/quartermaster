@@ -32,8 +32,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func newTxr(opts ...quartermaster.Option) *quartermaster.Transactor[*testdb.Queries] {
-	return quartermaster.New(pool, testdb.New(pool), opts...)
+func newTxr() *quartermaster.Transactor[*testdb.Queries] {
+	return quartermaster.New(pool, testdb.New(pool))
 }
 
 // count returns how many committed rows have name, read outside any transaction.
@@ -233,9 +233,10 @@ func TestTxOptionsApply(t *testing.T) {
 		t.Fatalf("default level = %q, %v; want read committed", got, err)
 	}
 
-	got, err = newTxr(quartermaster.WithTxOptions(pgx.TxOptions{IsoLevel: pgx.RepeatableRead})).RunTx(ctx, level)
+	cfg := quartermaster.Config{TxOptions: pgx.TxOptions{IsoLevel: pgx.RepeatableRead}}
+	got, err = quartermaster.NewWithConfig(pool, testdb.New(pool), cfg).RunTx(ctx, level)
 	if err != nil || got != "repeatable read" {
-		t.Fatalf("WithTxOptions level = %q, %v; want repeatable read", got, err)
+		t.Fatalf("Config.TxOptions level = %q, %v; want repeatable read", got, err)
 	}
 
 	got, err = newTxr().RunTxOpts(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable}, level)

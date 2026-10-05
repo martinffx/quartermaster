@@ -12,16 +12,22 @@ import (
 	"github.com/martinffx/quartermaster/internal/testdb"
 )
 
-// Wire the Transactor once, next to your sqlc-generated Queries. Options set
-// defaults for every transaction it starts.
+// Wire the Transactor once, next to your sqlc-generated Queries.
 func ExampleNew() {
+	// pool is a *pgxpool.Pool; testdb.New is sqlc's generated constructor.
+	txr := quartermaster.New(pool, testdb.New(pool))
+	_ = txr
+}
+
+// Config sets defaults for every transaction the Transactor starts.
+func ExampleNewWithConfig() {
 	ctx := context.Background()
 
 	// pool is a *pgxpool.Pool; testdb.New is sqlc's generated constructor.
-	txr := quartermaster.New(pool, testdb.New(pool),
-		quartermaster.WithTxOptions(pgx.TxOptions{IsoLevel: pgx.RepeatableRead}),
-		quartermaster.WithRollbackTimeout(2*time.Second),
-	)
+	txr := quartermaster.NewWithConfig(pool, testdb.New(pool), quartermaster.Config{
+		TxOptions:       pgx.TxOptions{IsoLevel: pgx.RepeatableRead},
+		RollbackTimeout: 2 * time.Second,
+	})
 
 	level, err := txr.RunTx(ctx, func(q *testdb.Queries) (string, error) {
 		return q.IsolationLevel(ctx)
